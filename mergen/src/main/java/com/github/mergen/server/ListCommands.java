@@ -52,7 +52,7 @@ public class ListCommands extends Controller {
 	}
 	
 	@RedisCommand(cmd = "LPOP")
-	public void rpop(MessageEvent e, Object[] args) {
+	public void lpop(MessageEvent e, Object[] args) {
 		String listname = new String((byte[]) args[1]);
 		IList<String> list = base.client.getList(listname);
 		Transaction txn1 = base.client.getTransaction();
@@ -78,6 +78,15 @@ public class ListCommands extends Controller {
 		}
 	}
 
+   @RedisCommand(cmd = "LLEN")
+   public void llen(MessageEvent e, Object[] args) {
+      String listname = new String((byte[]) args[1]);
+      IList<String> list = base.client.getList(listname);
+      
+      int length = list.size();
+      ServerReply sr = new ServerReply();
+      e.getChannel().write(sr.replyInt(length));
+   }
 	
 	
 	@RedisCommand(cmd = "LGETALL")
