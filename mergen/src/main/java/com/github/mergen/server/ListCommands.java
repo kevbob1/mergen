@@ -1,29 +1,16 @@
 package com.github.mergen.server;
 
-import com.hazelcast.core.Hazelcast;
+import java.util.Iterator;
+
 import com.hazelcast.core.IList;
-import com.hazelcast.core.IMap;
-import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.ITopic;
-import com.hazelcast.core.Message;
-import com.hazelcast.core.MessageListener;
+import com.hazelcast.core.ItemEvent;
+import com.hazelcast.core.ItemListener;
 import com.hazelcast.core.Transaction;
 
-import org.jboss.netty.channel.ChannelHandlerContext;
-import org.jboss.netty.channel.ChannelStateEvent;
 import org.jboss.netty.channel.MessageEvent;
-import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
-import org.jboss.netty.channel.group.ChannelGroup;
-import org.jboss.netty.buffer.ChannelBuffer;
-import org.jboss.netty.buffer.ChannelBuffers;
-import org.jboss.netty.channel.Channels;
-import java.util.*;
-import java.lang.annotation.*;
-import java.util.concurrent.*;
 
 import com.github.nedis.codec.CommandArgs;
 
-import java.nio.charset.Charset;
 
 public class ListCommands extends Controller {
 
@@ -78,6 +65,84 @@ public class ListCommands extends Controller {
 		}
 	}
 
+   @RedisCommand(cmd = "BLPOP")
+   public void blpop(MessageEvent e, Object[] args) {
+      long defaultTimeout = 30000;
+      final long startTime = System.currentTimeMillis();
+      String listname = new String((byte[]) args[1]);
+      IList<String> list = base.client.getList(listname);
+      Transaction txn1 = base.client.getTransaction();
+      
+      String v = null;
+      
+      ItemListener<String> listener = new ItemListener<String>() {
+         
+         @Override
+         public void itemAdded(ItemEvent<String> event) {
+            synchronized(this){
+               this.notify();
+            }
+         }
+
+         @Override
+         public void itemRemoved(ItemEvent<String> event) {
+            // do nothing we don't care
+         }
+         
+      };
+      
+      try {       
+         txn1.begin();
+         v = list.remove(0);         
+      } catch (IndexOutOfBoundsException exc){
+         // pass
+      } finally {
+         txn1.commit();
+      }
+      
+      if (v == null) {
+      try {
+         list.addItemListener(listener, false);
+         while (v == null && (System.currentTimeMillis() - startTime) < defaultTimeout) {
+            // loop until we get something, or time out
+            synchronized (listener) {
+               try {
+                  listener.wait(300);
+               } catch (InterruptedException e1) {
+                  break;
+               }
+            }
+               
+            try {       
+               txn1.begin();
+               v = list.remove(0);         
+               if (v != null) {
+                  break;
+               }
+            } catch (IndexOutOfBoundsException exc){
+               // pass
+            } finally {
+               txn1.commit();
+            }
+            
+         }
+      } finally {
+         list.removeItemListener(listener);
+      }
+      }
+      
+      if (v == null) {
+         ServerReply sr = new ServerReply();
+         e.getChannel().write(sr.replyNone());
+      } else {
+         CommandArgs c = new CommandArgs();
+         c.add((String) v);
+         e.getChannel().write(c.buffer());
+      }
+   }
+ 
+	
+	
    @RedisCommand(cmd = "LLEN")
    public void llen(MessageEvent e, Object[] args) {
       String listname = new String((byte[]) args[1]);
